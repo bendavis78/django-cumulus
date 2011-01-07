@@ -207,6 +207,19 @@ class CloudFilesStorage(Storage):
         """
         return '%s/%s' % (self.container_url, name)
 
+    def modified_time(self, name):
+        # check if we have dateutil installed
+        try:
+           from dateutil import parser, tz
+        except ImportError:
+            raise NotImplementedError()
+        obj = self.container.get_object(name)
+        # convert to string to date
+        date = parser.parse(obj.last_modified)
+        # convert date to local time w/o timezone
+        date = date.astimezone(tz.tzlocal()).replace(tzinfo=None)
+        return date
+
 class CloudFilesStaticStorage(CloudFilesStorage):
     """
     Same as CloudFilesStorage, except uses settings.CUMULUS_STATIC_CONTAINER
