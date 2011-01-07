@@ -72,8 +72,12 @@ class CloudFilesStorage(Storage):
 
     def _get_container(self):
         if not hasattr(self, '_container'):
-            self.container = self.connection.get_container(
-                                                        self.container_name)
+            if getattr(settings, 'CUMULUS_AUTO_CREATE_CONTAINER', True):
+                self.container = self.connection.create_container(
+                        self.container_name)
+            else:
+                self.container = self.connection.get_container(
+                        self.container_name)
         return self._container
 
     def _set_container(self, container):
