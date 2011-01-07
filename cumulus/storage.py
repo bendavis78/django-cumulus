@@ -46,6 +46,7 @@ class CloudFilesStorage(Storage):
         self.container_name = container or settings.CUMULUS_CONTAINER
         self.use_servicenet = getattr(settings, 'CUMULUS_USE_SERVICENET', False)
         self.connection_kwargs = connection_kwargs or {}
+        self._file_info = None
 
 
     def __getstate__(self):
@@ -133,6 +134,10 @@ class CloudFilesStorage(Storage):
         cloud_obj.send(content)
         content.close()
         return name
+    
+    def _load_file_info(self):
+        info = self.container.list_objects_info()
+        self._file_info = dict([(f['name'],f) for f in info])
 
     def delete(self, name):
         """
@@ -151,6 +156,9 @@ class CloudFilesStorage(Storage):
         Returns True if a file referenced by the given name already exists in
         the storage system, or False if the name is available for a new file.
         """
+        if self._file_info:
+            # use pre-loaded file info if we have it
+            return self._file_info.get(name, None) is not None
         try:
             self._get_cloud_obj(name)
             return True
@@ -202,6 +210,8 @@ class CloudFilesStorage(Storage):
         """
         Returns the total size, in bytes, of the file specified by name.
         """
+        if self._file_info:
+            return self._file_info.get('bytes')
         return self._get_cloud_obj(name).size
 
     def url(self, name):
@@ -217,9 +227,15 @@ class CloudFilesStorage(Storage):
            from dateutil import parser, tz
         except ImportError:
             raise NotImplementedError()
-        obj = self.container.get_object(name)
+        if self._file_info:
+            datestr = self._file_info.get(name).get('last_modified')
+        else:
+            datestr = self.container.get_object(name).last_modified
         # convert to string to date
-        date = parser.parse(obj.last_modified)
+        date = parser.parse(datestr)
+        # if the date has no timzone, assume UTC
+        if date.tzinfo == None:
+            date = date.replace(tzinfo=tz.tzutc())
         # convert date to local time w/o timezone
         date = date.astimezone(tz.tzlocal()).replace(tzinfo=None)
         return date
@@ -227,11 +243,16 @@ class CloudFilesStorage(Storage):
 class CloudFilesStaticStorage(CloudFilesStorage):
     """
     Same as CloudFilesStorage, except uses settings.CUMULUS_STATIC_CONTAINER
+    This also preloads info for all files within the container during 
+    instantiation, which yields better performance during collectstatic.
     """
     def __init__(self, *args, **kwargs):
         if not kwargs.get('container'):
             kwargs['container'] = getattr(settings, 'CUMULUS_STATIC_CONTAINER', None)
         super(CloudFilesStaticStorage, self).__init__(*args, **kwargs)
+        # Because static files are usually only uploaded en-masse (synced),
+        # we want to pre-load the info for all objects in the container.
+        self._load_file_info()
 
 class CloudFilesStorageFile(File):
     closed = False
