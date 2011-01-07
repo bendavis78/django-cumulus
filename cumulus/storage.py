@@ -207,6 +207,14 @@ class CloudFilesStorage(Storage):
         """
         return '%s/%s' % (self.container_url, name)
 
+class CloudFilesStaticStorage(CloudFilesStorage):
+    """
+    Same as CloudFilesStorage, except uses settings.CUMULUS_STATIC_CONTAINER
+    """
+    def __init__(self, *args, **kwargs):
+        if not kwargs.get('container'):
+            kwargs['container'] = getattr(settings, 'CUMULUS_STATIC_CONTAINER', None)
+        super(CloudFilesStaticStorage, self).__init__(*args, **kwargs)
 
 class CloudFilesStorageFile(File):
     closed = False
