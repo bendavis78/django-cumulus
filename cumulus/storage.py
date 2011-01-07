@@ -1,4 +1,5 @@
 import mimetypes
+from datetime import datetime
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files import File
@@ -46,7 +47,7 @@ class CloudFilesStorage(Storage):
         self.container_name = container or settings.CUMULUS_CONTAINER
         self.use_servicenet = getattr(settings, 'CUMULUS_USE_SERVICENET', False)
         self.connection_kwargs = connection_kwargs or {}
-        self._file_info = None
+        self._objects = None
 
 
     def __getstate__(self):
@@ -103,8 +104,10 @@ class CloudFilesStorage(Storage):
 
     def _get_cloud_obj(self, name):
         """
-        Helper function to get retrieve the requested Cloud Files Object.
+        Helper function to retrieve the requested Cloud Files Object.
         """
+        if self._objects and self._objects.get(name):
+            return self._objects[name]
         return self.container.get_object(name)
 
     def _open(self, name, mode='rb'):
@@ -135,9 +138,9 @@ class CloudFilesStorage(Storage):
         content.close()
         return name
     
-    def _load_file_info(self):
-        info = self.container.list_objects_info()
-        self._file_info = dict([(f['name'],f) for f in info])
+    def _load_objects(self):
+        objects = self.container.get_objects()
+        self._objects = dict([(o.name, o) for o in objects])
 
     def delete(self, name):
         """
@@ -156,9 +159,6 @@ class CloudFilesStorage(Storage):
         Returns True if a file referenced by the given name already exists in
         the storage system, or False if the name is available for a new file.
         """
-        if self._file_info:
-            # use pre-loaded file info if we have it
-            return self._file_info.get(name, None) is not None
         try:
             self._get_cloud_obj(name)
             return True
@@ -210,8 +210,6 @@ class CloudFilesStorage(Storage):
         """
         Returns the total size, in bytes, of the file specified by name.
         """
-        if self._file_info:
-            return self._file_info.get('bytes')
         return self._get_cloud_obj(name).size
 
     def url(self, name):
@@ -222,17 +220,19 @@ class CloudFilesStorage(Storage):
         return '%s/%s' % (self.container_url, name)
 
     def modified_time(self, name):
-        # check if we have dateutil installed
+        # CloudFiles return modified date in different formats
+        # depending on whether or not we pre-loaded objects.
+        # When pre-loaded, timezone is not included but we
+        # assume UTC. Since FileStorage returns localtime, and
+        # collectstatic compares these dates, we need to depend 
+        # on dateutil to help us convert timezones.
         try:
            from dateutil import parser, tz
         except ImportError:
             raise NotImplementedError()
-        if self._file_info:
-            datestr = self._file_info.get(name).get('last_modified')
-        else:
-            datestr = self.container.get_object(name).last_modified
+        obj = self.container.get_object(name)
         # convert to string to date
-        date = parser.parse(datestr)
+        date = parser.parse(obj.last_modified)
         # if the date has no timzone, assume UTC
         if date.tzinfo == None:
             date = date.replace(tzinfo=tz.tzutc())
@@ -252,7 +252,7 @@ class CloudFilesStaticStorage(CloudFilesStorage):
         super(CloudFilesStaticStorage, self).__init__(*args, **kwargs)
         # Because static files are usually only uploaded en-masse (synced),
         # we want to pre-load the info for all objects in the container.
-        self._load_file_info()
+        self._load_objects()
 
 class CloudFilesStorageFile(File):
     closed = False
