@@ -65,6 +65,10 @@ MIDDLEWARE_CLASSES = (
     'django.contrib.auth.middleware.AuthenticationMiddleware',
 )
 
+TEMPLATE_CONTEXT_PROCESSORS = (
+  'cumulus.context_processors.cdn_url',
+)
+
 ROOT_URLCONF = 'cumulus_project.urls'
 
 TEMPLATE_DIRS = (
@@ -79,6 +83,7 @@ INSTALLED_APPS = (
     'django.contrib.admin',
 
     'cumulus',
+    'cumulus.tests',
     'django_extensions',
     'imagekit',
     'sorl.thumbnail',

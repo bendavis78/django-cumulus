@@ -1,53 +1,33 @@
+import cloudfiles
 import mimetypes
-from datetime import datetime
-from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from cloudfiles.errors import NoSuchObject, ResponseError
+
 from django.core.files import File
 from django.core.files.storage import Storage
-from django.utils.text import get_valid_filename
 
-try:
-    import cloudfiles
-    from cloudfiles.errors import NoSuchObject, ResponseError
-except ImportError:
-    raise ImproperlyConfigured("Could not load cloudfiles dependency. See "
-                               "http://www.mosso.com/cloudfiles.jsp.")
-
-# TODO: implement TTL into cloudfiles methods
-CUMULUS_TTL = getattr(settings, 'CUMULUS_TTL', 600)
-
-
-def cumulus_upload_to(self, filename):
-    """
-    Simple, custom upload_to because Cloud Files doesn't support
-    nested containers (directories).
-
-    Actually found this out from @minter:
-    @richleland The Cloud Files APIs do support pseudo-subdirectories, by
-    creating zero-byte files with type application/directory.
-
-    May implement in a future version.
-    """
-    return get_valid_filename(filename)
+from .settings import CUMULUS
 
 
 class CloudFilesStorage(Storage):
     """
-    Custom storage for Mosso Cloud Files.
+    Custom storage for Rackspace Cloud Files.
     """
     default_quick_listdir = True
 
-    def __init__(self, username=None, api_key=None, container=None,
+    def __init__(self, username=None, api_key=None, container=None, timeout=None,
                  connection_kwargs=None):
         """
         Initialize the settings for the connection and container.
         """
-        self.username = username or settings.CUMULUS_USERNAME
-        self.api_key = api_key or settings.CUMULUS_API_KEY
-        self.container_name = container or settings.CUMULUS_CONTAINER
-        self.use_servicenet = getattr(settings, 'CUMULUS_USE_SERVICENET', False)
+        self.api_key = api_key or CUMULUS['API_KEY']
+        self.auth_url = CUMULUS['AUTH_URL']
         self.connection_kwargs = connection_kwargs or {}
-        self._objects = None
+        self.container_name = container or CUMULUS['CONTAINER']
+        self.timeout = timeout or CUMULUS['TIMEOUT']
+        self.use_servicenet = CUMULUS['SERVICENET']
+        self.username = username or CUMULUS['USERNAME']
+        self.use_ssl = CUMULUS['USE_SSL']
+        self.auto_create_container = CUMULUS['AUTO_CREATE_CONTAINER']
 
 
     def __getstate__(self):
@@ -57,14 +37,19 @@ class CloudFilesStorage(Storage):
         return dict(username=self.username,
                     api_key=self.api_key,
                     container_name=self.container_name,
+                    timeout=self.timeout,
                     use_servicenet=self.use_servicenet,
                     connection_kwargs=self.connection_kwargs)
 
     def _get_connection(self):
         if not hasattr(self, '_connection'):
-            self._connection = cloudfiles.get_connection(self.username,
-                                    self.api_key, self.use_servicenet,
-                                    **self.connection_kwargs)
+            self._connection = cloudfiles.get_connection(
+                                  username=self.username,
+                                  api_key=self.api_key,
+                                  authurl = self.auth_url,
+                                  timeout=self.timeout,
+                                  servicenet=self.use_servicenet,
+                                  **self.connection_kwargs)
         return self._connection
 
     def _set_connection(self, value):
@@ -74,7 +59,7 @@ class CloudFilesStorage(Storage):
 
     def _get_container(self):
         if not hasattr(self, '_container'):
-            if getattr(settings, 'CUMULUS_AUTO_CREATE_CONTAINER', True):
+            if self.auto_create_container:
                 self.container = self.connection.create_container(
                         self.container_name)
             else:
@@ -84,8 +69,7 @@ class CloudFilesStorage(Storage):
 
     def _set_container(self, container):
         """
-        Set the container, making it publicly available (on Limelight CDN) if
-        it is not already.
+        Set the container, making it publicly available if it is not already.
         """
         if not container.is_public():
             container.make_public()
@@ -97,7 +81,12 @@ class CloudFilesStorage(Storage):
 
     def _get_container_url(self):
         if not hasattr(self, '_container_public_uri'):
-            self._container_public_uri = self.container.public_uri()
+            if self.use_ssl:
+                self._container_public_uri = self.container.public_ssl_uri()
+            else:
+                self._container_public_uri = self.container.public_uri()
+        if CUMULUS['CNAMES'] and self._container_public_uri in CUMULUS['CNAMES']:
+            self._container_public_uri = CUMULUS['CNAMES'][self._container_public_uri]
         return self._container_public_uri
 
     container_url = property(_get_container_url)
@@ -131,6 +120,8 @@ class CloudFilesStorage(Storage):
         # getting the cloud object to try to guess.
         if hasattr(content.file, 'content_type'):
             cloud_obj.content_type = content.file.content_type
+        elif hasattr(content, 'content_type'):
+            cloud_obj.content_type = content.content_type
         else:
             mime_type, encoding = mimetypes.guess_type(name)
             cloud_obj.content_type = mime_type
@@ -263,6 +254,9 @@ class CloudFilesStorageFile(File):
         super(CloudFilesStorageFile, self).__init__(file=None, name=name,
                                                     *args, **kwargs)
 
+    def _get_pos(self):
+        return self._pos
+
     def _get_size(self):
         if not hasattr(self, '_size'):
             self._size = self._storage.size(self.name)
@@ -276,6 +270,7 @@ class CloudFilesStorageFile(File):
     def _get_file(self):
         if not hasattr(self, '_file'):
             self._file = self._storage._get_cloud_obj(self.name)
+            self._file.tell = self._get_pos
         return self._file
 
     def _set_file(self, value):
@@ -296,7 +291,6 @@ class CloudFilesStorageFile(File):
         """
         Open the cloud file object.
         """
-        self.file
         self._pos = 0
 
     def close(self, *args, **kwargs):
@@ -308,3 +302,38 @@ class CloudFilesStorageFile(File):
 
     def seek(self, pos):
         self._pos = pos
+
+class ThreadSafeCloudFilesStorage(CloudFilesStorage):
+    """
+    Extends CloudFilesStorage to make it mostly thread safe.
+
+    As long as you don't pass container or cloud objects
+    between threads, you'll be thread safe.
+
+    Uses one cloudfiles connection per thread.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(ThreadSafeCloudFilesStorage, self).__init__(*args, **kwargs)
+
+        import threading
+        self.local_cache = threading.local()
+
+    def _get_connection(self):
+        if not hasattr(self.local_cache, 'connection'):
+            connection = cloudfiles.get_connection(self.username,
+                                    self.api_key, **self.connection_kwargs)
+            self.local_cache.connection = connection
+
+        return self.local_cache.connection
+
+    connection = property(_get_connection, CloudFilesStorage._set_connection)
+
+    def _get_container(self):
+        if not hasattr(self.local_cache, 'container'):
+            container = self.connection.get_container(self.container_name)
+            self.local_cache.container = container
+
+        return self.local_cache.container
+
+    container = property(_get_container, CloudFilesStorage._set_container)

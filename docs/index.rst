@@ -6,7 +6,7 @@ The aim of django-cumulus is to provide a set of tools to utilize Rackspace Clou
 .. toctree::
    :maxdepth: 2
    :hidden:
-   
+
    changelog
 
 .. comment: split here
@@ -14,7 +14,7 @@ The aim of django-cumulus is to provide a set of tools to utilize Rackspace Clou
 Installation
 ************
 
-To install the latest release (currently 0.3.4) from PyPI using pip::
+To install the latest release (currently 1.0.3) from PyPI using pip::
 
     pip install django-cumulus
 
@@ -43,9 +43,9 @@ Add the following to your project's settings.py file::
 Alternatively, if you don't want to set the DEFAULT_FILE_STORAGE, you can do the following in your models::
 
     from cumulus.storage import CloudFilesStorage
-    
+
     cloudfiles_storage = CloudFilesStorage()
-    
+
     class Photo(models.Model):
         image = models.ImageField(storage=cloudfiles_storage, upload_to='photos')
         alt_text = models.CharField(max_length=255)
@@ -73,10 +73,10 @@ Add the following required settings::
 
      # the name of the container to sync with
     CUMULUS_STATIC_CONTAINER = 'MyStaticContainer'
-    
+
     # whether to use rackspace's internal private network
     CUMULUS_USE_SERVICENET = False
-    
+
     # a list of files to exclude from sync
     CUMULUS_FILTER_LIST = []
 
@@ -92,15 +92,31 @@ For a full list of available options::
 
     ./manage.py help syncstatic
 
+Context Processor
+*****************
+
+django-cumulus includes an optional context_processor for accessing the full CDN_URL of any container files from your templates.
+
+This is useful when you're using Cloud Files to serve you static media such as css and javascript and don't have access to the ``ImageField`` or ``FileField``'s url() convenience method.
+
+Add ``cumulus.context_processors.cdn_url`` to your list of context processors in your project's settings.py file::
+
+
+    TEMPLATE_CONTEXT_PROCESSORS = (
+        ...
+        'cumulus.context_processors.cdn_url',
+        ...
+    )
+
+Now in your templates you can use {{ CDN_URL }} to output the full path to local media::
+
+    <link rel="stylesheet" href="{{ CDN_URL }}css/style.css">
+
 Requirements
 ************
 
-* Django >= 1.1.2
-* python-cloudfiles >= 1.7.0
-
-You can install these dependencies yourself, or use the requirements file included in the package::
-
-    pip install -r https://github.com/richleland/django-cumulus/raw/0.3.4/requirements.txt
+* Django >= 1.1.4
+* python-cloudfiles >= 1.7.8
 
 Tests
 *****
