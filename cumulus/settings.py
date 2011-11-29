@@ -14,7 +14,9 @@ CUMULUS = {
     'USERNAME': None,
     'STATIC_CONTAINER': None,
     'FILTER_LIST': [],
-    'AUTO_CREATE_CONTAINER': True
+    'AUTO_CREATE_CONTAINER': True,
+    'CONTENT_ENCODING': None,
+    'CONTENT_DISPOSITION': None
 }
 
 if hasattr(settings, 'CUMULUS'):
