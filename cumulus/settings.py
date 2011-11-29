@@ -13,7 +13,9 @@ CUMULUS = {
     'USE_SSL': False,
     'USERNAME': None,
     'STATIC_CONTAINER': None,
-    'FILTER_LIST': []
+    'FILTER_LIST': [],
+    'CONTENT_ENCODING': None,
+    'CONTENT_DISPOSITION': None
 }
 
 if hasattr(settings, 'CUMULUS'):

@@ -15,6 +15,7 @@ class CloudFilesStorage(Storage):
     default_quick_listdir = True
 
     def __init__(self, username=None, api_key=None, container=None, timeout=None,
+                 content_encoding=None, content_disposition=None,
                  connection_kwargs=None):
         """
         Initialize the settings for the connection and container.
@@ -27,6 +28,8 @@ class CloudFilesStorage(Storage):
         self.use_servicenet = CUMULUS['SERVICENET']
         self.username = username or CUMULUS['USERNAME']
         self.use_ssl = CUMULUS['USE_SSL']
+        self.content_encoding = content_encoding or CUMULUS['CONTENT_ENCODING']
+        self.content_disposition = content_disposition or CUMULUS['CONTENT_DISPOSITION']
 
 
     def __getstate__(self):
@@ -118,6 +121,16 @@ class CloudFilesStorage(Storage):
         else:
             mime_type, encoding = mimetypes.guess_type(name)
             cloud_obj.content_type = mime_type
+
+        if self.content_encoding:
+            cloud_obj.content_encoding = self.content_encoding
+
+        if self.content_disposition:
+            if callable(self.content_disposition):
+                cloud_obj.content_disposition = self.content_disposition(cloud_obj)
+            else:
+                cloud_obj.content_disposition = self.content_disposition
+
         cloud_obj.send(content)
         content.close()
         return name
