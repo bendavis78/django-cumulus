@@ -31,6 +31,7 @@ class CloudFilesStorage(Storage):
         self.auto_create_container = CUMULUS['AUTO_CREATE_CONTAINER']
         self.content_encoding = content_encoding or CUMULUS['CONTENT_ENCODING']
         self.content_disposition = content_disposition or CUMULUS['CONTENT_DISPOSITION']
+        self._objects = None
 
 
     def __getstate__(self):
